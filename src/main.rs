@@ -1,9 +1,11 @@
 mod database;
 
 use bytes::Bytes;
+use core::future::poll_fn;
 use crossbeam::channel;
 use crossbeam::channel::{Receiver, Sender};
 use std::io::{stdin, Read};
+use std::task::Poll;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 use warp::{http, Filter};
@@ -94,19 +96,19 @@ async fn get_airplane_database(
 
     send.send(msg).unwrap();
 
-    let response = get_response_from_db(uuid, recv).await;
+    //let response = get_response_from_db(uuid, recv).await;
+    let response = poll_fn(|_cx| get_response_from_db(uuid, recv.clone())).await;
 
     Ok(warp::reply::json(&response.response))
 }
 
-async fn get_response_from_db(
+fn get_response_from_db(
     uuid: uuid::Uuid,
     recv: Receiver<database::Response>,
-) -> database::Response {
-    loop {
-        if let Some(response) = recv.iter().find(|response| response.uuid == uuid) {
-            return response;
-        }
+) -> Poll<database::Response> {
+    match recv.iter().find(|response| response.uuid == uuid) {
+        Some(response) => Poll::Ready(response),
+        None => Poll::Pending,
     }
 }
 

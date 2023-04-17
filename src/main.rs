@@ -1,39 +1,22 @@
+mod database;
+
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    io::{stdin, Read},
-    sync::{Arc, RwLock},
-};
+use crossbeam::channel;
+use crossbeam::channel::{Receiver, Sender};
+use std::io::{stdin, Read};
 use tokio::runtime::Runtime;
+use uuid::Uuid;
 use warp::{http, Filter};
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-struct AirplaneStatus {
-    identifier: String,
-    altitude: i32,
-}
-
-#[derive(Clone)]
-struct Database {
-    airplane_list: Arc<RwLock<HashMap<String, i32>>>,
-}
-
-impl Database {
-    fn new() -> Self {
-        Database {
-            airplane_list: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-}
-
 fn main() {
-    let database = Database::new();
+    let (send_to_db, recv_from_main) = channel::unbounded();
+    let (send_to_main, recv_from_db) = channel::unbounded();
+    database::Database::start_message_processor(recv_from_main, send_to_main);
 
     println!("Spawning Warp Endpoint");
     let rt = Runtime::new().unwrap();
     rt.spawn(async move {
-        launch_warp(database).await;
+        launch_warp(recv_from_db, send_to_db).await;
     });
 
     println!("Doing Other Stuff");
@@ -42,24 +25,26 @@ fn main() {
     println!("Exiting Main");
 }
 
-async fn launch_warp(database: Database) {
+async fn launch_warp(rx: Receiver<database::Response>, tx: Sender<database::Request>) {
     println!("Launching Warp Endpoint");
 
-    let database_filter = warp::any().map(move || database.clone());
+    let send_filter = warp::any().map(move || tx.clone());
+    let recv_filter = warp::any().map(move || rx.clone());
 
     // POST localhost:3030/ {"identifier": "ZZ123", "altitude": 15000}
     let add_airplane = warp::post()
         .and(warp::path::end())
         .and(warp::body::content_length_limit(1024 * 16))
         .and(warp::body::json())
-        .and(database_filter.clone())
+        .and(send_filter.clone())
         .and_then(update_airplane_database);
 
     // GET localhost:3030/database
     let get_database = warp::get()
         .and(warp::path::path("database"))
         .and(warp::path::end())
-        .and(database_filter.clone())
+        .and(send_filter.clone())
+        .and(recv_filter.clone())
         .and_then(get_airplane_database);
 
     // POST localhost:3030/raw
@@ -75,33 +60,59 @@ async fn launch_warp(database: Database) {
 }
 
 async fn update_airplane_database(
-    airplane: AirplaneStatus,
-    database: Database,
+    airplane: database::AirplaneStatus,
+    send: Sender<database::Request>,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     println!("Add airplane to database");
     println!("{:?}", airplane);
 
-    database
-        .airplane_list
-        .write()
-        .unwrap()
-        .insert(airplane.identifier, airplane.altitude);
+    let uuid = Uuid::new_v4();
+    let msg = database::Request {
+        uuid: uuid,
+        request: database::RequestMessage::Add(airplane),
+    };
+
+    send.send(msg).unwrap();
+
     Ok(warp::reply::with_status(
         "Added Airplane to Database",
         http::StatusCode::CREATED,
     ))
 }
 
-async fn get_airplane_database(database: Database) -> Result<impl warp::Reply, warp::Rejection> {
+async fn get_airplane_database(
+    send: Sender<database::Request>,
+    recv: Receiver<database::Response>,
+) -> Result<impl warp::Reply, warp::Rejection> {
     println!("Sending database to client");
 
-    let hashmap_out = database.airplane_list.read().unwrap();
-    Ok(warp::reply::json(&*hashmap_out))
+    let uuid = Uuid::new_v4();
+    let msg = database::Request {
+        uuid: uuid,
+        request: database::RequestMessage::GetDB,
+    };
+
+    send.send(msg).unwrap();
+
+    let response = get_response_from_db(uuid, recv).await;
+
+    Ok(warp::reply::json(&response.response))
+}
+
+async fn get_response_from_db(
+    uuid: uuid::Uuid,
+    recv: Receiver<database::Response>,
+) -> database::Response {
+    loop {
+        if let Some(response) = recv.iter().find(|response| response.uuid == uuid) {
+            return response;
+        }
+    }
 }
 
 async fn process_raw_bytes(buf: Bytes) -> Result<impl warp::Reply, warp::Rejection> {
     println!("raw bytes = {:?}", buf);
-    let v: AirplaneStatus = serde_json::from_slice(&buf).unwrap();
+    let v: database::AirplaneStatus = serde_json::from_slice(&buf).unwrap();
     println!("{:?}", v);
     Ok(warp::reply())
 }

@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -5,7 +6,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 use tokio::runtime::Runtime;
-use warp::{http, http::Response, Filter};
+use warp::{http, Filter};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct AirplaneStatus {
@@ -61,7 +62,14 @@ async fn launch_warp(database: Database) {
         .and(database_filter.clone())
         .and_then(get_airplane_database);
 
-    let routes = add_airplane.or(get_database);
+    // POST localhost:3030/raw
+    let post_raw_bytes = warp::post()
+        .and(warp::path::path("raw"))
+        .and(warp::path::end())
+        .and(warp::body::bytes())
+        .and_then(process_raw_bytes);
+
+    let routes = add_airplane.or(get_database).or(post_raw_bytes);
 
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 }
@@ -70,6 +78,9 @@ async fn update_airplane_database(
     airplane: AirplaneStatus,
     database: Database,
 ) -> Result<impl warp::Reply, warp::Rejection> {
+    println!("Add airplane to database");
+    println!("{:?}", airplane);
+
     database
         .airplane_list
         .write()
@@ -82,6 +93,15 @@ async fn update_airplane_database(
 }
 
 async fn get_airplane_database(database: Database) -> Result<impl warp::Reply, warp::Rejection> {
+    println!("Sending database to client");
+
     let hashmap_out = database.airplane_list.read().unwrap();
     Ok(warp::reply::json(&*hashmap_out))
+}
+
+async fn process_raw_bytes(buf: Bytes) -> Result<impl warp::Reply, warp::Rejection> {
+    println!("raw bytes = {:?}", buf);
+    let v: AirplaneStatus = serde_json::from_slice(&buf).unwrap();
+    println!("{:?}", v);
+    Ok(warp::reply())
 }

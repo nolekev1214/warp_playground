@@ -23,7 +23,8 @@ async fn launch_warp() {
     println!("Launching Warp Endpoint");
 
     // GET /?name=<var>
-    let get_params = warp::path::end()
+    let get_params = warp::get()
+        .and(warp::path::end())
         .and(warp::query::<HashMap<String, String>>())
         .map(|p: HashMap<String, String>| match p.get("name") {
             Some(name) => Response::builder().body(format!("Hello, {}", name)),
@@ -31,20 +32,17 @@ async fn launch_warp() {
         });
 
     // GET /ids/
-    let return_json = warp::path("ids").map(|| {
+    let return_json = warp::get().and(warp::path("ids")).map(|| {
         let our_ids = vec![1, 2, 6, 4];
         warp::reply::json(&our_ids)
     });
 
     let routes = get_params.or(return_json);
 
-    //let http_warp = warp::serve(routes).run(([127, 0, 0, 1], 3030));
     warp::serve(routes)
         .tls()
         .cert_path("tls/cert.pem")
         .key_path("tls/key.pem")
-        .run(([127, 0, 0, 1], 3040))
+        .run(([127, 0, 0, 1], 3030))
         .await;
-
-    //tokio::join!(http_warp, https_warp);
 }

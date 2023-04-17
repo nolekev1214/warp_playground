@@ -9,6 +9,11 @@ pub struct AirplaneStatus {
     altitude: i32,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AirplaneId {
+    identifier: String,
+}
+
 pub struct Request {
     pub uuid: uuid::Uuid,
     pub request: RequestMessage,
@@ -16,6 +21,7 @@ pub struct Request {
 
 pub enum RequestMessage {
     Add(AirplaneStatus),
+    GetAirplane(AirplaneId),
     GetDB,
 }
 
@@ -26,7 +32,7 @@ pub struct Response {
 
 #[derive(Serialize)]
 pub enum ResponseMessage {
-    Airplane(AirplaneStatus),
+    Airplane(Option<AirplaneStatus>),
     Database(HashMap<String, i32>),
 }
 
@@ -52,6 +58,23 @@ impl Database {
                 }
                 RequestMessage::GetDB => {
                     let response = ResponseMessage::Database(self.airplane_list.clone());
+                    let msg = Response {
+                        uuid: message.uuid,
+                        response: response,
+                    };
+                    tx.send(msg).unwrap();
+                }
+                RequestMessage::GetAirplane(airplane) => {
+                    let response =
+                        if let Some(altitude) = self.airplane_list.get(&airplane.identifier) {
+                            let airplane_status = AirplaneStatus {
+                                altitude: *altitude,
+                                identifier: airplane.identifier,
+                            };
+                            ResponseMessage::Airplane(Some(airplane_status))
+                        } else {
+                            ResponseMessage::Airplane(None)
+                        };
                     let msg = Response {
                         uuid: message.uuid,
                         response: response,

@@ -1,9 +1,8 @@
 mod database;
 
 use bytes::Bytes;
-use core::future::poll_fn;
-use crossbeam::channel;
-use crossbeam::channel::{Receiver, Sender};
+use crossbeam::channel::{self, Receiver, Sender};
+use std::future;
 use std::io::{stdin, Read};
 use std::task::Poll;
 use tokio::runtime::Runtime;
@@ -49,6 +48,15 @@ async fn launch_warp(rx: Receiver<database::Response>, tx: Sender<database::Requ
         .and(recv_filter.clone())
         .and_then(get_airplane_database);
 
+    let get_airplane = warp::get()
+        .and(warp::path::path("database"))
+        .and(warp::path::end())
+        .and(warp::body::content_length_limit(1024 * 16))
+        .and(warp::body::json())
+        .and(send_filter.clone())
+        .and(recv_filter.clone())
+        .and_then(get_airplane);
+
     // POST localhost:3030/raw
     let post_raw_bytes = warp::post()
         .and(warp::path::path("raw"))
@@ -56,7 +64,10 @@ async fn launch_warp(rx: Receiver<database::Response>, tx: Sender<database::Requ
         .and(warp::body::bytes())
         .and_then(process_raw_bytes);
 
-    let routes = add_airplane.or(get_database).or(post_raw_bytes);
+    let routes = add_airplane
+        .or(get_airplane)
+        .or(get_database)
+        .or(post_raw_bytes);
 
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 }
@@ -96,8 +107,25 @@ async fn get_airplane_database(
 
     send.send(msg).unwrap();
 
-    //let response = get_response_from_db(uuid, recv).await;
-    let response = poll_fn(|_cx| get_response_from_db(uuid, recv.clone())).await;
+    let response = future::poll_fn(|_cx| get_response_from_db(uuid, recv.clone())).await;
+
+    Ok(warp::reply::json(&response.response))
+}
+
+async fn get_airplane(
+    airplane: database::AirplaneId,
+    send: Sender<database::Request>,
+    recv: Receiver<database::Response>,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let uuid = Uuid::new_v4();
+    let msg = database::Request {
+        uuid: uuid,
+        request: database::RequestMessage::GetAirplane(airplane),
+    };
+
+    send.send(msg).unwrap();
+
+    let response = future::poll_fn(|_cx| get_response_from_db(uuid, recv.clone())).await;
 
     Ok(warp::reply::json(&response.response))
 }

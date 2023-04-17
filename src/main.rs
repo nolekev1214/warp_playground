@@ -1,19 +1,21 @@
 #![deny(warnings)]
 use std::{
     collections::HashMap,
-    io::{self, Read},
+    io::{stdin, Read},
 };
 use tokio::runtime::Runtime;
 use warp::{http::Response, Filter};
 
 fn main() {
+    println!("Spawning Warp Endpoint");
     let rt = Runtime::new().unwrap();
     rt.spawn(async move {
         launch_warp().await;
     });
 
     println!("Doing Other Stuff");
-    let _ = io::stdin().read(&mut [0u8]).unwrap();
+
+    stdin().read(&mut [0u8]).unwrap();
     println!("Exiting Main");
 }
 

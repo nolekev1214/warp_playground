@@ -48,6 +48,7 @@ async fn launch_warp(rx: Receiver<database::Response>, tx: Sender<database::Requ
         .and(recv_filter.clone())
         .and_then(get_airplane_database);
 
+    // GET localhost:3030/database/?identifier="ZZ777"
     let get_airplane = warp::get()
         .and(warp::path::path("database"))
         .and(warp::path::end())
@@ -107,7 +108,7 @@ async fn get_airplane_database(
 
     send.send(msg).unwrap();
 
-    let response = future::poll_fn(|_cx| get_response_from_db(uuid, recv.clone())).await;
+    let response = future::poll_fn(|_| get_response_from_db(uuid, recv.clone())).await;
 
     Ok(warp::reply::json(&response.response))
 }

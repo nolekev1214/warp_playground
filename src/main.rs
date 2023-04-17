@@ -26,10 +26,7 @@ async fn launch_warp() {
     let get_params = warp::get()
         .and(warp::path::end())
         .and(warp::query::<HashMap<String, String>>())
-        .map(|p: HashMap<String, String>| match p.get("name") {
-            Some(name) => Response::builder().body(format!("Hello, {}", name)),
-            None => Response::builder().body(String::from("No \"name\" param in query.")),
-        });
+        .and_then(say_hello);
 
     // GET /ids/
     let return_json = warp::get().and(warp::path("ids")).map(|| {
@@ -40,4 +37,11 @@ async fn launch_warp() {
     let routes = get_params.or(return_json);
 
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
+}
+
+async fn say_hello(inputs: HashMap<String, String>) -> Result<impl warp::Reply, warp::Rejection> {
+    match inputs.get("name") {
+        Some(name) => Ok(Response::builder().body(format!("Hello, {}", name))),
+        None => Ok(Response::builder().body(String::from("No \"name\" param in query."))),
+    }
 }

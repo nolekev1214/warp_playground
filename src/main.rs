@@ -38,5 +38,13 @@ async fn launch_warp() {
 
     let routes = get_params.or(return_json);
 
-    warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
+    //let http_warp = warp::serve(routes).run(([127, 0, 0, 1], 3030));
+    warp::serve(routes)
+        .tls()
+        .cert_path("tls/cert.pem")
+        .key_path("tls/key.pem")
+        .run(([127, 0, 0, 1], 3040))
+        .await;
+
+    //tokio::join!(http_warp, https_warp);
 }

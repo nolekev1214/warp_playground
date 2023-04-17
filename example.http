@@ -1,9 +1,28 @@
-GET http://localhost:3030/ids
+POST http://localhost:3030/ HTTP/1.1
+Content-Type: application/json
+
+{
+    "identifier": "ZZ123",
+    "altitude": 15000
+}
 
 ###
+POST http://localhost:3030/ HTTP/1.1
+Content-Type: application/json
 
-GET http://localhost:3030/?name=Kevin
+{
+    "identifier": "AB111",
+    "altitude": 10000
+}
 
 ###
+POST http://localhost:3030/ HTTP/1.1
+Content-Type: application/json
 
-GET http://localhost:3030/bad-endpoint
+{
+    "identifier": "CC222",
+    "altitude": 150
+}
+
+###
+GET http://localhost:3030/database/

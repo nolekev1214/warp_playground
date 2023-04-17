@@ -1,16 +1,38 @@
-#![deny(warnings)]
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     io::{stdin, Read},
+    sync::{Arc, RwLock},
 };
 use tokio::runtime::Runtime;
-use warp::{http::Response, Filter};
+use warp::{http, http::Response, Filter};
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct AirplaneStatus {
+    identifier: String,
+    altitude: i32,
+}
+
+#[derive(Clone)]
+struct Database {
+    airplane_list: Arc<RwLock<HashMap<String, i32>>>,
+}
+
+impl Database {
+    fn new() -> Self {
+        Database {
+            airplane_list: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+}
 
 fn main() {
+    let database = Database::new();
+
     println!("Spawning Warp Endpoint");
     let rt = Runtime::new().unwrap();
     rt.spawn(async move {
-        launch_warp().await;
+        launch_warp(database).await;
     });
 
     println!("Doing Other Stuff");
@@ -19,29 +41,47 @@ fn main() {
     println!("Exiting Main");
 }
 
-async fn launch_warp() {
+async fn launch_warp(database: Database) {
     println!("Launching Warp Endpoint");
 
-    // GET /?name=<var>
-    let get_params = warp::get()
+    let database_filter = warp::any().map(move || database.clone());
+
+    // POST localhost:3030/ {"identifier": "ZZ123", "altitude": 15000}
+    let add_airplane = warp::post()
         .and(warp::path::end())
-        .and(warp::query::<HashMap<String, String>>())
-        .and_then(say_hello);
+        .and(warp::body::content_length_limit(1024 * 16))
+        .and(warp::body::json())
+        .and(database_filter.clone())
+        .and_then(update_airplane_database);
 
-    // GET /ids/
-    let return_json = warp::get().and(warp::path("ids")).map(|| {
-        let our_ids = vec![1, 2, 6, 4];
-        warp::reply::json(&our_ids)
-    });
+    // GET localhost:3030/database
+    let get_database = warp::get()
+        .and(warp::path::path("database"))
+        .and(warp::path::end())
+        .and(database_filter.clone())
+        .and_then(get_airplane_database);
 
-    let routes = get_params.or(return_json);
+    let routes = add_airplane.or(get_database);
 
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 }
 
-async fn say_hello(inputs: HashMap<String, String>) -> Result<impl warp::Reply, warp::Rejection> {
-    match inputs.get("name") {
-        Some(name) => Ok(Response::builder().body(format!("Hello, {}", name))),
-        None => Ok(Response::builder().body(String::from("No \"name\" param in query."))),
-    }
+async fn update_airplane_database(
+    airplane: AirplaneStatus,
+    database: Database,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    database
+        .airplane_list
+        .write()
+        .unwrap()
+        .insert(airplane.identifier, airplane.altitude);
+    Ok(warp::reply::with_status(
+        "Added Airplane to Database",
+        http::StatusCode::CREATED,
+    ))
+}
+
+async fn get_airplane_database(database: Database) -> Result<impl warp::Reply, warp::Rejection> {
+    let hashmap_out = database.airplane_list.read().unwrap();
+    Ok(warp::reply::json(&*hashmap_out))
 }

@@ -1,0 +1,9 @@
+GET http://localhost:3030/ids
+
+###
+
+GET http://localhost:3030/?name=Kevin
+
+###
+
+GET http://localhost:3030/bad-endpoint

@@ -1,7 +1,8 @@
-use crossbeam::channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::thread;
+use tokio::sync::mpsc::Receiver;
+use tokio::sync::oneshot::Sender;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AirplaneStatus {
@@ -14,72 +15,55 @@ pub struct AirplaneId {
     identifier: String,
 }
 
-pub struct Request {
-    pub uuid: uuid::Uuid,
-    pub request: RequestMessage,
-}
-
-pub enum RequestMessage {
+pub enum Request {
     Add(AirplaneStatus),
-    GetAirplane(AirplaneId),
-    GetDB,
-}
-
-pub struct Response {
-    pub uuid: uuid::Uuid,
-    pub response: ResponseMessage,
+    GetAirplane((AirplaneId, Sender<Response>)),
+    GetDB(Sender<Response>),
 }
 
 #[derive(Serialize)]
-pub enum ResponseMessage {
+pub enum Response {
     Airplane(Option<AirplaneStatus>),
     Database(HashMap<String, i32>),
 }
 
 pub struct Database {
     airplane_list: HashMap<String, i32>,
+    command_channel: Receiver<Request>,
 }
 
 impl Database {
-    pub fn start_message_processor(rx: Receiver<Request>, tx: Sender<Response>) {
+    pub fn start_message_processor(rx: Receiver<Request>) {
         let mut db = Database {
             airplane_list: HashMap::new(),
+            command_channel: rx,
         };
-        thread::spawn(move || db.process_messages(rx, tx));
+        thread::spawn(move || db.process_messages());
     }
 
-    fn process_messages(self: &mut Self, rx: Receiver<Request>, tx: Sender<Response>) {
+    fn process_messages(self: &mut Self) {
         loop {
-            let message = rx.recv().unwrap();
-            match message.request {
-                RequestMessage::Add(airplane) => {
+            match self.command_channel.blocking_recv().unwrap() {
+                Request::Add(airplane) => {
                     self.airplane_list
                         .insert(airplane.identifier, airplane.altitude);
                 }
-                RequestMessage::GetDB => {
-                    let response = ResponseMessage::Database(self.airplane_list.clone());
-                    let msg = Response {
-                        uuid: message.uuid,
-                        response: response,
-                    };
-                    tx.send(msg).unwrap();
+                Request::GetDB(tx) => {
+                    let response = Response::Database(self.airplane_list.clone());
+                    tx.send(response);
                 }
-                RequestMessage::GetAirplane(airplane) => {
+                Request::GetAirplane((airplane, tx)) => {
                     let response =
                         if let Some(altitude) = self.airplane_list.get(&airplane.identifier) {
                             let airplane_status = AirplaneStatus {
                                 altitude: *altitude,
                                 identifier: airplane.identifier,
                             };
-                            ResponseMessage::Airplane(Some(airplane_status))
+                            Response::Airplane(Some(airplane_status))
                         } else {
-                            ResponseMessage::Airplane(None)
+                            Response::Airplane(None)
                         };
-                    let msg = Response {
-                        uuid: message.uuid,
-                        response: response,
-                    };
-                    tx.send(msg).unwrap();
+                    tx.send(response);
                 }
             };
         }

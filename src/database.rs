@@ -15,13 +15,14 @@ pub struct AirplaneId {
     identifier: String,
 }
 
+#[derive(Debug)]
 pub enum Request {
     Add(AirplaneStatus),
     GetAirplane((AirplaneId, Sender<Response>)),
     GetDB(Sender<Response>),
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub enum Response {
     Airplane(Option<AirplaneStatus>),
     Database(HashMap<String, i32>),
@@ -41,31 +42,42 @@ impl Database {
         thread::spawn(move || db.process_messages());
     }
 
-    fn process_messages(self: &mut Self) {
+    fn process_messages(&mut self) {
         loop {
-            match self.command_channel.blocking_recv().unwrap() {
-                Request::Add(airplane) => {
-                    self.airplane_list
-                        .insert(airplane.identifier, airplane.altitude);
-                }
-                Request::GetDB(tx) => {
-                    let response = Response::Database(self.airplane_list.clone());
-                    tx.send(response);
-                }
+            let command = self.command_channel.blocking_recv();
+            if command.is_none(){
+                return;
+            }
+            match command.unwrap() {
+                Request::Add(airplane) => self.add_airplane(airplane),
+                Request::GetDB(tx) => self.get_database(tx),
                 Request::GetAirplane((airplane, tx)) => {
-                    let response =
-                        if let Some(altitude) = self.airplane_list.get(&airplane.identifier) {
-                            let airplane_status = AirplaneStatus {
-                                altitude: *altitude,
-                                identifier: airplane.identifier,
-                            };
-                            Response::Airplane(Some(airplane_status))
-                        } else {
-                            Response::Airplane(None)
-                        };
-                    tx.send(response);
+                    self.get_airplane(airplane, tx);
                 }
             };
         }
+    }
+
+    fn add_airplane(&mut self, airplane: AirplaneStatus) {
+        self.airplane_list
+            .insert(airplane.identifier, airplane.altitude);
+    }
+
+    fn get_database(&self, response_channel: Sender<Response>) {
+        let response = Response::Database(self.airplane_list.clone());
+        response_channel.send(response).unwrap();
+    }
+
+    fn get_airplane(&self, airplane_id: AirplaneId, response_channel: Sender<Response>) {
+        let response = if let Some(altitude) = self.airplane_list.get(&airplane_id.identifier) {
+            let airplane_status = AirplaneStatus {
+                altitude: *altitude,
+                identifier: airplane_id.identifier,
+            };
+            Response::Airplane(Some(airplane_status))
+        } else {
+            Response::Airplane(None)
+        };
+        response_channel.send(response).unwrap()
     }
 }

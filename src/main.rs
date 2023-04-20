@@ -4,6 +4,7 @@ use bytes::Bytes;
 use std::io::{stdin, Read};
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, mpsc::Sender, oneshot};
+use warp::hyper::StatusCode;
 use warp::{http, Filter};
 
 fn main() {
@@ -18,7 +19,8 @@ fn main() {
 
     println!("Doing Other Stuff");
 
-    stdin().read(&mut [0u8]).unwrap();
+    let mut buffer = [0; 1];
+    stdin().read_exact(&mut buffer).unwrap();
     println!("Exiting Main");
 }
 
@@ -40,7 +42,10 @@ async fn launch_warp(tx: Sender<database::Request>) {
         .and(warp::path::path("database"))
         .and(warp::path::end())
         .and(send_filter.clone())
-        .and_then(get_airplane_database);
+        .and_then(get_airplane_database)
+        .recover(|_| async move {
+            Ok::<StatusCode, warp::Rejection>(StatusCode::INTERNAL_SERVER_ERROR)
+        });
 
     // GET localhost:3030/database/?identifier="ZZ777"
     let get_airplane = warp::get()
@@ -49,7 +54,10 @@ async fn launch_warp(tx: Sender<database::Request>) {
         .and(warp::body::content_length_limit(1024 * 16))
         .and(warp::body::json())
         .and(send_filter.clone())
-        .and_then(get_airplane);
+        .and_then(get_airplane)
+        .recover(|_| async move {
+            Ok::<StatusCode, warp::Rejection>(StatusCode::INTERNAL_SERVER_ERROR)
+        });
 
     // POST localhost:3030/raw
     let post_raw_bytes = warp::post()
@@ -74,7 +82,7 @@ async fn update_airplane_database(
     println!("{:?}", airplane);
 
     let msg = database::Request::Add(airplane);
-    send.send(msg).await;
+    send.send(msg).await.unwrap();
 
     Ok(warp::reply::with_status(
         "Added Airplane to Database",
@@ -90,11 +98,13 @@ async fn get_airplane_database(
     let (tx, rx) = oneshot::channel();
 
     let msg = database::Request::GetDB(tx);
-    send.send(msg).await;
 
-    let response = rx.await.unwrap();
-
-    Ok(warp::reply::json(&response))
+    if (send.send(msg).await).is_err() {
+        Err(warp::reject())
+    } else {
+        let response = rx.await.unwrap();
+        Ok(warp::reply::json(&response))
+    }
 }
 
 async fn get_airplane(
@@ -106,11 +116,13 @@ async fn get_airplane(
     let (tx, rx) = oneshot::channel();
 
     let msg = database::Request::GetAirplane((airplane, tx));
-    send.send(msg).await;
 
-    let response = rx.await.unwrap();
-
-    Ok(warp::reply::json(&response))
+    if (send.send(msg).await).is_err() {
+        Err(warp::reject())
+    } else {
+        let response = rx.await.unwrap();
+        Ok(warp::reply::json(&response))
+    }
 }
 
 async fn process_raw_bytes(buf: Bytes) -> Result<impl warp::Reply, warp::Rejection> {

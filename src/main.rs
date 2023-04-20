@@ -4,8 +4,11 @@ use bytes::Bytes;
 use std::io::{stdin, Read};
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, mpsc::Sender, oneshot};
-use warp::hyper::StatusCode;
 use warp::{http, Filter};
+
+#[derive(Debug)]
+struct InternalChannelError;
+impl warp::reject::Reject for InternalChannelError {}
 
 fn main() {
     let (tx, rx) = mpsc::channel(1000);
@@ -41,10 +44,7 @@ async fn launch_warp(tx: Sender<database::Request>) {
         .and(warp::path::path("database"))
         .and(warp::path::end())
         .and(send_filter.clone())
-        .and_then(get_airplane_database)
-        .recover(|_| async move {
-            Ok::<StatusCode, warp::Rejection>(StatusCode::INTERNAL_SERVER_ERROR)
-        });
+        .and_then(get_airplane_database);
 
     // GET localhost:3030/database/?identifier="ZZ777"
     let get_airplane = warp::get()
@@ -53,10 +53,7 @@ async fn launch_warp(tx: Sender<database::Request>) {
         .and(warp::body::content_length_limit(1024 * 16))
         .and(warp::body::json())
         .and(send_filter.clone())
-        .and_then(get_airplane)
-        .recover(|_| async move {
-            Ok::<StatusCode, warp::Rejection>(StatusCode::INTERNAL_SERVER_ERROR)
-        });
+        .and_then(get_airplane);
 
     // POST localhost:3030/raw
     let post_raw_bytes = warp::post()
@@ -99,7 +96,7 @@ async fn get_airplane_database(
     let msg = database::Request::GetDB(tx);
 
     if (send.send(msg).await).is_err() {
-        Err(warp::reject())
+        Err(warp::reject::custom(InternalChannelError))
     } else {
         let response = rx.await.unwrap();
         Ok(warp::reply::json(&response))
@@ -117,7 +114,7 @@ async fn get_airplane(
     let msg = database::Request::GetAirplane((airplane, tx));
 
     if (send.send(msg).await).is_err() {
-        Err(warp::reject())
+        Err(warp::reject::custom(InternalChannelError))
     } else {
         let response = rx.await.unwrap();
         Ok(warp::reply::json(&response))

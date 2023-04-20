@@ -2,6 +2,7 @@ mod database;
 
 use bytes::Bytes;
 use std::io::{stdin, Read};
+use std::net::SocketAddrV4;
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, mpsc::Sender, oneshot};
 use warp::{http, Filter};
@@ -10,8 +11,11 @@ use warp::{http, Filter};
 struct InternalChannelError;
 impl warp::reject::Reject for InternalChannelError {}
 
+const DATABASE_MESSAGE_QUEUE_SIZE: usize = 1000;
+const SERVER_ADDRESS: &'static str = "127.0.0.1:3030";
+
 fn main() {
-    let (tx, rx) = mpsc::channel(1000);
+    let (tx, rx) = mpsc::channel(DATABASE_MESSAGE_QUEUE_SIZE);
     database::Database::start_message_processor(rx);
 
     println!("Spawning Warp Endpoint");
@@ -67,7 +71,9 @@ async fn launch_warp(tx: Sender<database::Request>) {
         .or(get_database)
         .or(post_raw_bytes);
 
-    warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
+    warp::serve(routes)
+        .run(SERVER_ADDRESS.parse::<SocketAddrV4>().unwrap())
+        .await;
 }
 
 async fn update_airplane_database(

@@ -50,7 +50,7 @@ async fn launch_warp(tx: Sender<database::Request>) {
         .and(send_filter.clone())
         .and_then(get_airplane_database);
 
-    // GET localhost:3030/database/?identifier="ZZ777"
+    // GET localhost:3030/database/ {"identifier": "ZZ123"}
     let get_airplane = warp::get()
         .and(warp::path::path("database"))
         .and(warp::path::end())
@@ -71,9 +71,8 @@ async fn launch_warp(tx: Sender<database::Request>) {
         .or(get_database)
         .or(post_raw_bytes);
 
-    warp::serve(routes)
-        .run(SERVER_ADDRESS.parse::<SocketAddrV4>().unwrap())
-        .await;
+    let server_address: SocketAddrV4 = SERVER_ADDRESS.parse().unwrap();
+    warp::serve(routes).run(server_address).await;
 }
 
 async fn update_airplane_database(

@@ -1,6 +1,7 @@
 mod database;
 
 use bytes::Bytes;
+use database::Database;
 use std::io::{stdin, Read};
 use std::net::SocketAddrV4;
 use tokio::runtime::Runtime;
@@ -16,7 +17,7 @@ const SERVER_ADDRESS: &'static str = "127.0.0.1:3030";
 
 fn main() {
     let (tx, rx) = mpsc::channel(DATABASE_MESSAGE_QUEUE_SIZE);
-    database::Database::start_message_processor(rx);
+    Database::start_message_processor(rx);
 
     println!("Spawning Warp Endpoint");
     let rt = Runtime::new().unwrap();

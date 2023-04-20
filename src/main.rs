@@ -19,8 +19,7 @@ fn main() {
 
     println!("Doing Other Stuff");
 
-    let mut buffer = [0; 1];
-    stdin().read_exact(&mut buffer).unwrap();
+    stdin().read_exact(&mut [0_u8; 1]).unwrap();
     println!("Exiting Main");
 }
 

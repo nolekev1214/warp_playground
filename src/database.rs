@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::thread;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot::Sender;
+use tokio::sync::RwLock;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AirplaneStatus {
@@ -62,36 +63,39 @@ impl Database {
 
     async fn process_message(airplane_list: Arc<RwLock<HashMap<String, i32>>>, command: Request) {
         match command {
-            Request::Add(airplane) => Database::add_airplane(airplane_list, airplane),
+            Request::Add(airplane) => Database::add_airplane(airplane_list, airplane).await,
             Request::GetAirplane((airplane, tx)) => {
-                Database::get_airplane(airplane_list, airplane, tx)
+                Database::get_airplane(airplane_list, airplane, tx).await
             }
-            Request::GetDB(tx) => Database::get_database(airplane_list, tx),
+            Request::GetDB(tx) => Database::get_database(airplane_list, tx).await,
         }
     }
 
-    fn add_airplane(airplane_list: Arc<RwLock<HashMap<String, i32>>>, airplane: AirplaneStatus) {
+    async fn add_airplane(
+        airplane_list: Arc<RwLock<HashMap<String, i32>>>,
+        airplane: AirplaneStatus,
+    ) {
         airplane_list
             .write()
-            .unwrap()
+            .await
             .insert(airplane.identifier, airplane.altitude);
     }
 
-    fn get_database(
+    async fn get_database(
         airplane_list: Arc<RwLock<HashMap<String, i32>>>,
         response_channel: Sender<Response>,
     ) {
-        let response = Response::Database(airplane_list.read().unwrap().clone());
+        let response = Response::Database(airplane_list.read().await.clone());
         response_channel.send(response).unwrap();
     }
 
-    fn get_airplane(
+    async fn get_airplane(
         airplane_list: Arc<RwLock<HashMap<String, i32>>>,
         airplane_id: AirplaneId,
         response_channel: Sender<Response>,
     ) {
         let response =
-            if let Some(altitude) = airplane_list.read().unwrap().get(&airplane_id.identifier) {
+            if let Some(altitude) = airplane_list.read().await.get(&airplane_id.identifier) {
                 let airplane_status = AirplaneStatus {
                     altitude: *altitude,
                     identifier: airplane_id.identifier,

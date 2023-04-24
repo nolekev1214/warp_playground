@@ -13,7 +13,7 @@ struct InternalChannelError;
 impl warp::reject::Reject for InternalChannelError {}
 
 const DATABASE_MESSAGE_QUEUE_SIZE: usize = 1000;
-const SERVER_ADDRESS: &'static str = "127.0.0.1:3030";
+const SERVER_ADDRESS: &str = "127.0.0.1:3030";
 
 fn main() {
     let (tx, rx) = mpsc::channel(DATABASE_MESSAGE_QUEUE_SIZE);

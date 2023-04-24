@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 use std::thread;
+use tokio::runtime::Runtime;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot::Sender;
 
@@ -29,55 +31,75 @@ pub enum Response {
 }
 
 pub struct Database {
-    airplane_list: HashMap<String, i32>,
+    airplane_list: Arc<RwLock<HashMap<String, i32>>>,
     command_channel: Receiver<Request>,
+    thread_pool: Runtime,
 }
 
 impl Database {
     pub fn start_message_processor(rx: Receiver<Request>) {
         let mut db = Database {
-            airplane_list: HashMap::new(),
+            airplane_list: Arc::new(RwLock::new(HashMap::new())),
             command_channel: rx,
+            thread_pool: Runtime::new().unwrap(),
         };
         thread::spawn(move || db.process_messages());
     }
 
     fn process_messages(&mut self) {
         loop {
-            let command = self.command_channel.blocking_recv();
-            if command.is_none(){
-                return;
-            }
-            match command.unwrap() {
-                Request::Add(airplane) => self.add_airplane(airplane),
-                Request::GetDB(tx) => self.get_database(tx),
-                Request::GetAirplane((airplane, tx)) => {
-                    self.get_airplane(airplane, tx);
+            match self.command_channel.blocking_recv() {
+                Some(command) => {
+                    let airplane_list = self.airplane_list.clone();
+                    self.thread_pool.spawn(async {
+                        Database::process_message(airplane_list, command).await;
+                    })
                 }
+                None => return,
             };
         }
     }
 
-    fn add_airplane(&mut self, airplane: AirplaneStatus) {
-        self.airplane_list
+    async fn process_message(airplane_list: Arc<RwLock<HashMap<String, i32>>>, command: Request) {
+        match command {
+            Request::Add(airplane) => Database::add_airplane(airplane_list, airplane),
+            Request::GetAirplane((airplane, tx)) => {
+                Database::get_airplane(airplane_list, airplane, tx)
+            }
+            Request::GetDB(tx) => Database::get_database(airplane_list, tx),
+        }
+    }
+
+    fn add_airplane(airplane_list: Arc<RwLock<HashMap<String, i32>>>, airplane: AirplaneStatus) {
+        airplane_list
+            .write()
+            .unwrap()
             .insert(airplane.identifier, airplane.altitude);
     }
 
-    fn get_database(&self, response_channel: Sender<Response>) {
-        let response = Response::Database(self.airplane_list.clone());
+    fn get_database(
+        airplane_list: Arc<RwLock<HashMap<String, i32>>>,
+        response_channel: Sender<Response>,
+    ) {
+        let response = Response::Database(airplane_list.read().unwrap().clone());
         response_channel.send(response).unwrap();
     }
 
-    fn get_airplane(&self, airplane_id: AirplaneId, response_channel: Sender<Response>) {
-        let response = if let Some(altitude) = self.airplane_list.get(&airplane_id.identifier) {
-            let airplane_status = AirplaneStatus {
-                altitude: *altitude,
-                identifier: airplane_id.identifier,
+    fn get_airplane(
+        airplane_list: Arc<RwLock<HashMap<String, i32>>>,
+        airplane_id: AirplaneId,
+        response_channel: Sender<Response>,
+    ) {
+        let response =
+            if let Some(altitude) = airplane_list.read().unwrap().get(&airplane_id.identifier) {
+                let airplane_status = AirplaneStatus {
+                    altitude: *altitude,
+                    identifier: airplane_id.identifier,
+                };
+                Response::Airplane(Some(airplane_status))
+            } else {
+                Response::Airplane(None)
             };
-            Response::Airplane(Some(airplane_status))
-        } else {
-            Response::Airplane(None)
-        };
         response_channel.send(response).unwrap()
     }
 }

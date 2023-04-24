@@ -28,7 +28,7 @@ Content-Type: application/json
 GET http://localhost:3030/database/
 
 ###
-GET http://localhost:3030/airplane/
+GET http://localhost:3030/database/
 Content-Type: application/json
 
 {
